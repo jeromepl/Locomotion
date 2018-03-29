@@ -7,7 +7,7 @@ import itertools
 
 
 LEARNING_RATE = 1e-4
-N_STEPS = 2 # Number of actions to perform before reflecting on them (updating weights)
+N_STEPS = 5 # Number of actions to perform before reflecting on them (updating weights)
 GAMMA = 0.99 # discount for past values, multiplies past Q-values, giving more importance to most recent values
 BETA = 1e-4 # entropy multiplier
 
@@ -38,6 +38,7 @@ class ActorCritic:
         self.action_mu += tf.constant(self.env.action_space.low[0] + output_width / 2, dtype=tf.float32)
         self.action_sigma = tf.layers.Dense(units=self.env.action_space.shape[0], activation=tf.nn.softplus)(self.dense2)
         self.action_sigma = tf.squeeze(self.action_sigma)
+        self.action_sigma = tf.sqrt(self.action_sigma) # The network outputs sigma^2. Get the stddev from that
 
         self.value = tf.layers.Dense(units=1)(self.dense2)
         self.value = tf.squeeze(self.value)
