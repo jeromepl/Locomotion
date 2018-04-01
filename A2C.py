@@ -1,63 +1,96 @@
 import gym
 import numpy as np
+import os
 import matplotlib.pyplot as plt
 import tensorflow as tf
-import os
-import itertools
 
+# Adapted from https://github.com/stefanbo92/A3C-Continuous
 
-LEARNING_RATE = 1e-4
-N_STEPS = 5 # Number of actions to perform before reflecting on them (updating weights)
-GAMMA = 0.99 # discount for past values, multiplies past Q-values, giving more importance to most recent values
-BETA = 1e-4 # entropy multiplier
+# PARAMETERS
+RENDER = False              # Render one of the worker's environment
+LOG_DIR = './logs'
+SAVE_VIDEOS = False         # Save video replays
+VIDEO_DIR = './videos'
+N_WORKERS = 4               # Number of workers
+GLOBAL_NET_SCOPE = 'Global_Net'
+N_STEPS = 10                # Number of actions to perform before reflecting on them (updating weights)
+GAMMA = 0.90                # Discount factor
+ENTROPY_BETA = 0.01         # Entropy multiplier
+LR_ACTOR = 0.0001           # Learning rate for actor
+LR_CRITIC = 0.001           # Learning rate for critic
 
-SAVE_VIDEOS = False
+GAME = 'Pendulum-v0'
+env = gym.make(GAME)
+N_S = env.observation_space.shape[0]                    # Number of states
+N_A = env.action_space.shape[0]                         # Number of actions
+A_BOUND = [env.action_space.low, env.action_space.high] # Action bounds
 
-class ActorCritic:
-    def __init__(self, env, sess, summary_writer):
-        self.env = env
+# Network for the Actor Critic
+class ACNet(object):
+    def __init__(self, scope, sess, globalAC=None, summary_writer=None):
+        self.scope = scope
         self.sess = sess
+        self.globalAC = globalAC
         self.summary_writer = summary_writer
         self.summary_step = 0
 
-        with tf.name_scope('ac'):
+        self.actor_optimizer = tf.train.RMSPropOptimizer(LR_ACTOR)
+        self.critic_optimizer = tf.train.RMSPropOptimizer(LR_CRITIC)
+
+        with tf.variable_scope(self.scope):
+            self.state = tf.placeholder(tf.float32, [None, N_S])
+
             self._generate_network()
-            self._generate_ops()
-            self._generate_summaries()
 
-    def _generate_network(self):
-        self.state = tf.placeholder(tf.float32, shape=[None, self.env.observation_space.shape[0]])
-        self.dense1 = tf.layers.Dense(units=128, activation=tf.nn.elu)(self.state)
-        self.dense2 = tf.layers.Dense(units=64, activation=tf.nn.elu)(self.dense1)
+            if self.scope != GLOBAL_NET_SCOPE: # local network, calculate losses
+                self._generate_ops()
+                self._generate_summaries()
+                
+    def _generate_network(self): # neural network structure of the actor and critic
+        w_init = tf.random_normal_initializer(0., .1)
+        with tf.variable_scope('actor'):
+            dense1 = tf.layers.dense(self.state, 200, tf.nn.relu6, kernel_initializer=w_init)
+            self.action_mu = tf.layers.dense(dense1, N_A, tf.nn.tanh, kernel_initializer=w_init) # estimated action value
+            self.action_sigma = tf.layers.dense(dense1, N_A, tf.nn.softplus, kernel_initializer=w_init) # estimated variance
 
-        self.action_mu = tf.layers.Dense(units=self.env.action_space.shape[0], activation=tf.nn.tanh)(self.dense2)
-        self.action_mu = tf.squeeze(self.action_mu)
         # Scale action_mu depending on the environment (since tanh activation yields (-1, 1))
-        output_width = self.env.action_space.high[0] - self.env.action_space.low[0]
-        self.action_mu *= output_width / 2
-        self.action_mu += tf.constant(self.env.action_space.low[0] + output_width / 2, dtype=tf.float32)
-        self.action_sigma = tf.layers.Dense(units=self.env.action_space.shape[0], activation=tf.nn.softplus)(self.dense2)
-        self.action_sigma = tf.squeeze(self.action_sigma)
-        self.action_sigma = tf.sqrt(self.action_sigma) # The network outputs sigma^2. Get the stddev from that
+        # output_width = A_BOUND[1] - A_BOUND[0]
+        # self.action_mu *= output_width / 2
+        # self.action_mu += A_BOUND[1] + output_width / 2
+        self.action_mu *= A_BOUND[1]
+        self.action_sigma += 1e-4 # Ensure a minimum exploration
 
-        self.value = tf.layers.Dense(units=1)(self.dense2)
-        self.value = tf.squeeze(self.value)
-
-        self.norm_dist = tf.contrib.distributions.Normal(self.action_mu, self.action_sigma)
-        self.action = self.norm_dist.sample(1)
-        self.action = tf.clip_by_value(self.action, self.env.action_space.low[0], self.env.action_space.high[0])
-
+        with tf.variable_scope('critic'):
+            dense2 = tf.layers.dense(self.state, 100, tf.nn.relu6, kernel_initializer=w_init)
+            self.value = tf.layers.dense(dense2, 1, kernel_initializer=w_init)  # estimated value for state
+        self.actor_params = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.scope + '/actor')
+        self.critic_params = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.scope + '/critic')
+    
     def _generate_ops(self):
-        self.action_train = tf.placeholder(tf.float32, name="action_train")
-        self.advantage_train = tf.placeholder(tf.float32, name="advantage_train")
-        self.actor_loss = -tf.log(self.norm_dist.prob(self.action_train) + 1e-10) * self.advantage_train - BETA * self.norm_dist.entropy()
-        
-        self.target_value = tf.placeholder(tf.float32, name="target_value")
-        self.critic_loss = tf.losses.mean_squared_error(self.value, self.target_value)
+        self.action_train= tf.placeholder(tf.float32, [None, N_A])        # action
+        self.target_value = tf.placeholder(tf.float32, [None, 1]) # target_value value
 
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE)
-        self.train_actor = self.optimizer.minimize(self.actor_loss)
-        self.train_critic = self.optimizer.minimize(self.critic_loss)
+        advantage = tf.subtract(self.target_value, self.value)
+        self.critic_loss = tf.reduce_mean(tf.square(advantage))
+
+        normal_dist = tf.contrib.distributions.Normal(self.action_mu, self.action_sigma)
+
+        log_prob = normal_dist.log_prob(self.action_train)
+        exp_v = log_prob * advantage
+        entropy = normal_dist.entropy()  # encourage exploration
+        self.exp_v = ENTROPY_BETA * entropy + exp_v
+        self.actor_loss = tf.reduce_mean(-self.exp_v)
+
+        self.action = tf.clip_by_value(tf.squeeze(normal_dist.sample(1), axis=0), A_BOUND[0], A_BOUND[1]) # sample a action from distribution
+
+        self.actor_grads = tf.gradients(self.actor_loss, self.actor_params) #calculate gradients for the network weights
+        self.critic_grads = tf.gradients(self.critic_loss, self.critic_params)
+
+        self.pull_actor_params_op = [l_p.assign(g_p) for l_p, g_p in zip(self.actor_params, self.globalAC.actor_params)]
+        self.pull_critic_params_op = [l_p.assign(g_p) for l_p, g_p in zip(self.critic_params, self.globalAC.critic_params)]
+        self.update_actor_op = self.actor_optimizer.apply_gradients(zip(self.actor_grads, self.globalAC.actor_params))
+        self.update_critic_op = self.critic_optimizer.apply_gradients(zip(self.critic_grads, self.globalAC.critic_params))
+
     
     def _generate_summaries(self):
         tf.summary.scalar('Actor Loss', tf.reduce_sum(self.actor_loss))
@@ -65,96 +98,108 @@ class ActorCritic:
         tf.summary.histogram('Action mu', self.action_mu)
         tf.summary.histogram('Action sigma', self.action_sigma)
         # TODO tf.placeholder total_reward
-        self.summary_op = tf.summary.merge_all() # scope='ac')
-    
-    def train(self, replay_buffer):
-        replay_buffer = np.array(replay_buffer)
-        states = np.vstack(replay_buffer[:,0])
-        actions = np.vstack(replay_buffer[:,1])
-        rewards = replay_buffer[:,2]
-        values = np.vstack(replay_buffer[:,3])
-        dones = replay_buffer[:,4]
+        self.summary_op = tf.summary.merge_all(scope=self.scope)
 
-        # Compute the "true" Q-values backwards from the last replay sample
-        true_values = np.zeros(values.shape)
-        for i in range(1, len(replay_buffer) + 1):
-            if dones[-i]:
-                true_values[-i] = 0 # Done means no more reward can be obtained from that point
-                continue
-
-            if i == 1:
-                true_values[-i] = values[-1] # Start from the last sample, taking the Critic's value as base truth
-            else:
-                true_values[-i] = rewards[-i + 1] + GAMMA * true_values[-i + 1]
-
-        advantages = true_values - values
-        feed_dict = {
-            self.state: states,
-            self.action_train: actions,
-            self.advantage_train: advantages,
-            self.target_value: true_values
-        }
-        summary, _, _ = self.sess.run([self.summary_op, self.train_actor, self.train_critic], feed_dict=feed_dict)
+    def update_global(self, feed_dict):  # run by a local
+        summary, _, _ = self.sess.run([self.summary_op, self.update_actor_op, self.update_critic_op], feed_dict)  # local grads applies to global net
         self.summary_writer.add_summary(summary, global_step=self.summary_step)
         self.summary_step += 1
 
-    # Evalute a single state and return both the actor and the critic outputs
-    def __call__(self, current_state, training=False):
-        feed_dict = { self.state: current_state }
-        if training:
-            return self.sess.run([self.action, self.value], feed_dict=feed_dict)
-        else:
-            return self.sess.run(self.action_mu, feed_dict=feed_dict) # Return the action before gaussian noise is applied
+    def pull_global(self):  # run by a local
+        self.sess.run([self.pull_actor_params_op, self.pull_critic_params_op])
 
-def main():
-    env = gym.make('MountainCarContinuous-v0') # ('MountainCarContinuous-v0')
-    # Save replay videos
-    if SAVE_VIDEOS: # Affects performance
-        video_dir = os.path.abspath('./videos')
-        if not os.path.exists(video_dir):
-            os.makedirs(video_dir)
-        env = gym.wrappers.Monitor(env, video_dir, force=True)
+    def choose_action(self, state):  # run by a local
+        state = state[np.newaxis, :]
+        return self.sess.run(self.action, {self.state: state})[0]
 
-    # Tensorboard config. Run `tensorboard --logdir=./logs`
-    log_dir = os.path.abspath('./logs')
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    summary_writer = tf.summary.FileWriter(log_dir)
+# worker class that inits own environment, trains on it and updloads weights to global net
+class Worker(object):
+    def __init__(self, i, globalAC, summary_writer, sess):
+        self.env = gym.make(GAME)   # make environment for each workers
+        self.i = i
+        self.AC = ACNet('worker{}'.format(i), sess, globalAC, summary_writer) # create ACNet for each worker
+        self.sess = sess
 
-    sess = tf.Session()
+        if SAVE_VIDEOS and i == 0: # Save replay videos. Affects performance
+            video_dir = os.path.abspath(VIDEO_DIR)
+            if not os.path.exists(video_dir):
+                os.makedirs(video_dir)
+            self.env = gym.wrappers.Monitor(self.env, video_dir, force=True)
 
-    ac = ActorCritic(env, sess, summary_writer)
-    summary_writer.add_graph(sess.graph)
-    sess.run(tf.global_variables_initializer())
+        # Variables used to step through the simulation
+        self.state_buffer = []
+        self.action_buffer = []
+        self.reward_buffer = []
+        self.state = self.env.reset()
+        self.total_reward = 0
 
-    # The replay buffer contains state (s), action (a), reward (r), value from Critic (v) and done (d) for each step taken
-    replay_buffer = []
+        self.episode_count = 0
+        self.step_count = 0
+   
+    def step(self):
+        if RENDER and self.i == 0:
+            self.env.render()
+        action = self.AC.choose_action(self.state)         # estimate stochastic action based on policy 
+        next_state, reward, done, _ = self.env.step(action) # make step in environment
 
-    for episode in itertools.count():
-        state = env.reset()
-        total_reward = 0
-        for t in itertools.count():
-            env.render()
+        self.total_reward += reward
+        # save actions, states and rewards in buffer
+        self.state_buffer.append(self.state)          
+        self.action_buffer.append(action)
+        self.reward_buffer.append((reward + 8.1368022) / 8.1368022)    # normalize reward between -1 and 1. The min reward is -16.2736044 and the max is 0.
 
-            state = np.expand_dims(state, 0)
-            action, value = ac(state, training=True)
-            next_state, reward, done, _ = env.step(action)
-
-            replay_buffer.append([state, action, reward, value, done])
-            state = next_state
-            total_reward += reward
-
-            if done or len(replay_buffer) == N_STEPS:
-                ac.train(replay_buffer) # Reflect on the past N_STEPS actions
-                replay_buffer = []
-
+        if self.step_count % N_STEPS == 0 or done:   # update global and assign to local net
             if done:
-                if state[0] > 0.45:
-                    print("Successfull after {} steps!".format(t+1))
-                break
+                true_value = 0   # terminal
+            else:
+                true_value = self.sess.run(self.AC.value, {self.AC.state: next_state[np.newaxis, :]})[0, 0]
+            true_values = []
+            for reward in self.reward_buffer[::-1]:    # reverse buffer r
+                true_value = reward + GAMMA * true_value
+                true_values.append(true_value)
+            true_values.reverse()
 
-        print("Episode {} finished. Total reward: {}".format(episode, total_reward))
-        # TODO tf.Summary.Value(tag='Total episode reward', simple_value=total_reward)
+            state_buffer, action_buffer, true_values = np.vstack(self.state_buffer), np.vstack(self.action_buffer), np.vstack(true_values)
+            feed_dict = {
+                self.AC.state: state_buffer,
+                self.AC.action_train: action_buffer,
+                self.AC.target_value: true_values,
+            }
+            self.AC.update_global(feed_dict) # actual training step, update global ACNet
+            self.state_buffer, self.action_buffer, self.reward_buffer = [], [], []
+            self.AC.pull_global() # get global parameters to local ACNet
+
+        self.state = next_state
+        self.step_count += 1
+        if done:
+            print("Episode {} finished. Total reward for worker {}: {}".format(self.episode_count, self.i, self.total_reward))
+
+            self.step_count = 0
+            self.total_reward = 0
+            self.episode_count += 1
+            self.state = self.env.reset()
 
 if __name__ == "__main__":
-	main()
+
+    log_dir = os.path.abspath(LOG_DIR)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    summary_writer = tf.summary.FileWriter(LOG_DIR)
+    
+    sess = tf.Session()
+
+    # with tf.device("/cpu:0"):
+    global_ac = ACNet(GLOBAL_NET_SCOPE,sess)  # we only need its params
+    workers = []
+    # Create workers
+    print ("Create {} workers".format(N_WORKERS))
+    for i in range(N_WORKERS):
+        workers.append(Worker(i, global_ac, summary_writer, sess))
+
+    # coord = tf.train.Coordinator()
+    sess.run(tf.global_variables_initializer())
+    summary_writer.add_graph(sess.graph)
+
+    while True:
+        for worker in workers:
+            worker.step()
