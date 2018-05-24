@@ -7,11 +7,11 @@ import tensorflow as tf
 # Adapted from https://github.com/stefanbo92/A3C-Continuous
 
 # PARAMETERS
-RENDER = False              # Render one of the worker's environment
-LOG_DIR = './logs'
+RENDER = True              # Render one of the worker's environment
+LOG_DIR = './logs-test'
 SAVE_VIDEOS = False         # Save video replays
 VIDEO_DIR = './videos'
-N_WORKERS = 4               # Number of workers
+N_WORKERS = 16               # Number of workers
 GLOBAL_NET_SCOPE = 'Global_Net'
 N_STEPS = 10                # Number of actions to perform before reflecting on them (updating weights)
 GAMMA = 0.90                # Discount factor
@@ -60,7 +60,11 @@ class ACNet(object):
         self.action_mu *= A_BOUND[1]
         self.action_sigma += 1e-4 # Ensure a minimum exploration
 
+        self.normal_dist = tf.contrib.distributions.Normal(self.action_mu, self.action_sigma)
+        self.action = tf.clip_by_value(tf.squeeze(self.normal_dist.sample(1), axis=0), A_BOUND[0], A_BOUND[1]) # sample a action from distribution
+
         with tf.variable_scope('critic'):
+            # concat_layer = tf.concat([self.state, self.action], 1)
             dense2 = tf.layers.dense(self.state, 100, tf.nn.relu6, kernel_initializer=w_init)
             self.value = tf.layers.dense(dense2, 1, kernel_initializer=w_init)  # estimated value for state
         self.actor_params = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.scope + '/actor')
@@ -73,15 +77,11 @@ class ACNet(object):
         advantage = tf.subtract(self.target_value, self.value)
         self.critic_loss = tf.reduce_mean(tf.square(advantage))
 
-        normal_dist = tf.contrib.distributions.Normal(self.action_mu, self.action_sigma)
-
-        log_prob = normal_dist.log_prob(self.action_train)
+        log_prob = self.normal_dist.log_prob(self.action_train)
         exp_v = log_prob * advantage
-        entropy = normal_dist.entropy()  # encourage exploration
+        entropy = self.normal_dist.entropy()  # encourage exploration
         self.exp_v = ENTROPY_BETA * entropy + exp_v
         self.actor_loss = tf.reduce_mean(-self.exp_v)
-
-        self.action = tf.clip_by_value(tf.squeeze(normal_dist.sample(1), axis=0), A_BOUND[0], A_BOUND[1]) # sample a action from distribution
 
         self.actor_grads = tf.gradients(self.actor_loss, self.actor_params) #calculate gradients for the network weights
         self.critic_grads = tf.gradients(self.critic_loss, self.critic_params)
@@ -147,6 +147,7 @@ class Worker(object):
         self.state_buffer.append(self.state)          
         self.action_buffer.append(action)
         self.reward_buffer.append((reward + 8.1368022) / 8.1368022)    # normalize reward between -1 and 1. The min reward is -16.2736044 and the max is 0.
+        # self.reward_buffer.append(reward)
 
         if self.step_count % N_STEPS == 0 or done:   # update global and assign to local net
             if done:
@@ -172,12 +173,19 @@ class Worker(object):
         self.state = next_state
         self.step_count += 1
         if done:
-            print("Episode {} finished. Total reward for worker {}: {}".format(self.episode_count, self.i, self.total_reward))
+            # print("Episode {} finished. Total reward for worker {}: {}".format(self.episode_count, self.i, self.total_reward))
+            print(self.total_reward)
+
+            t_r = self.total_reward
 
             self.step_count = 0
             self.total_reward = 0
             self.episode_count += 1
             self.state = self.env.reset()
+
+            return t_r
+        else:
+            return None
 
 if __name__ == "__main__":
 
@@ -200,6 +208,28 @@ if __name__ == "__main__":
     sess.run(tf.global_variables_initializer())
     summary_writer.add_graph(sess.graph)
 
+    t_rs = [[], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []]
+    colors = ['r-', 'b-', 'c-', 'g-']
+    steps = 0
     while True:
-        for worker in workers:
-            worker.step()
+        for i, worker in enumerate(workers):
+            v = worker.step()
+            if v is not None:
+                t_rs[i].append(v)
+
+        steps += 1
+
+        if steps % (200*100) == 0:
+            data = []
+            for i in range(len(t_rs[0])):
+                temp = 0
+                for j in range(len(t_rs)):
+                    temp += 1 / N_WORKERS * t_rs[j][i]
+                data.append(temp)
+            
+            # for i in range(len(t_rs)):
+            plt.plot(range(0, len(t_rs[0]) * N_WORKERS, N_WORKERS), data, colors[0])
+            plt.xlabel('Episode')
+            plt.ylabel('Total Reward')
+            plt.show()
+
