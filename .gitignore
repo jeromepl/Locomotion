@@ -1,6 +1,6 @@
 /.vscode/
-/logs/
+/log*/
 /tutorials/
-/videos/
+/videos*/
 *.code-workspace
 *.gif
