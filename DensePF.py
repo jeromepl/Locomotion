@@ -1,6 +1,8 @@
 import tensorflow as tf
 import math
 
+import matplotlib.pyplot as plt
+
 
 # Dense Phase-Functionned layer
 # TODO currently only supports random_normal initializer for both the kernel and the bias
@@ -55,9 +57,24 @@ def cubic_catmull_rom_spline(weight_sets, phase):
     w = (4*phase) % 1
 
     def k(n):
-        return (tf.floor(4*phase) + n - 1) % 4
+        return tf.cast((tf.floor(4*phase) + n - 1) % 4, tf.int32)
     
     return alpha[k(1)] \
         + w * (1/2*alpha[k(2)] - 1/2*alpha[k(0)]) \
         + w**2 * (alpha[k(0)] - 5/2*alpha[k(1)] + 2*alpha[k(2)] - 1/2*alpha[k(3)]) \
         + w**3 * (3/2*alpha[k(1)] - 3/2*alpha[k(2)] + 1/2*alpha[k(3)] - 1/2*alpha[k(0)])
+
+
+# Test
+if __name__ == '__main__':
+    tf.enable_eager_execution()
+
+    weight_sets = tf.constant([[0], [1], [-2], [2]], dtype=tf.float32)
+    results = []
+    phases = []
+    for phase in tf.range(0, 1, 0.01):
+        phases.append(phase)
+        results.append(cubic_catmull_rom_spline(weight_sets, phase))
+
+    plt.plot(phases, results)
+    plt.show()
