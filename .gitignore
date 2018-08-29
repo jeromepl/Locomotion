@@ -1,6 +1,21 @@
 /.vscode/
 /log*/
+/dump*/
 /tutorials/
 /videos*/
 *.code-workspace
 *.gif
+.vs/
+
+# Pip's folder for external repos
+/src/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
