@@ -70,13 +70,23 @@ class Logger(object):
             logname: name for log (e.g. 'Hopper-v1')
             now: unique sub-directory name (e.g. date/time string)
         """
-        os.makedirs(path)
+        self.path = path
+        self.models_path = os.path.join(path, 'models')
+        os.makedirs(os.path.join(path, 'code'))
+        os.makedirs(self.models_path)
 
         # put copy of all python files in log_dir
-        # filenames = glob.glob('**/*.py')
-        # for filename in filenames:     # for reference
-        #     shutil.copy(filename, path)
-        shutil.copytree('.', os.path.join(path, 'code/'))
+        filenames = glob.glob('*.py')
+        for filename in filenames:  # Copy the files
+            shutil.copy2(filename, os.path.join(path, 'code'))
+
+        folders_to_copy = ['ppo', 'gym_env']
+        for folder_to_copy in folders_to_copy:  # Find all python files in the desired folders
+            filenames = glob.glob(folder_to_copy + '/*.py')
+            os.makedirs(os.path.join(path, 'code', folder_to_copy))
+            for filename in filenames:  # Copy the files
+                shutil.copy2(filename, os.path.join(
+                    path, 'code', folder_to_copy))
 
         path = os.path.join(path, 'log.csv')
 
@@ -84,6 +94,16 @@ class Logger(object):
         self.log_entry = {}
         self.f = open(path, 'w')
         self.writer = None  # DictWriter created with first call to write() method
+
+    def add_tf_models(self, models_dict):
+        self.models_dict = models_dict
+
+    def save_models(self, episode):
+        for model_name in self.models_dict:
+            model = self.models_dict[model_name]
+            model.save(os.path.join(
+                self.models_path, model_name + '.ckpt-' + str(episode)))
+        print('\n')
 
     def write(self, display=True):
         """ Write 1 log entry to file, and optionally to stdout

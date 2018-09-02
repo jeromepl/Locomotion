@@ -12,8 +12,8 @@ pip install -r requirements.txt
 # For a list of all arguments
 python train.py --help
 
-# To run on a compute cloud
-python train.py --render False
+# To run and show the humanoid while training
+python train.py --render
 ```
 
 ## Credits

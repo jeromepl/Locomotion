@@ -1,7 +1,4 @@
 import tensorflow as tf
-import math
-
-import matplotlib.pyplot as plt
 
 
 # Dense Phase-Functionned layer
@@ -59,7 +56,8 @@ def cubic_catmull_rom_spline(weight_sets, phase):
     def k(n):
         return (tf.cast(4*phase, tf.int32) + n - 1) % 4
 
-    y0 = tf.gather(alpha, k(0)) # basically alpha[k(0)] but where k(0) is a tensor
+    # basically alpha[k(0)] but where k(0) is a tensor
+    y0 = tf.gather(alpha, k(0))
     y1 = tf.gather(alpha, k(1))
     y2 = tf.gather(alpha, k(2))
     y3 = tf.gather(alpha, k(3))
@@ -79,6 +77,8 @@ def cubic_catmull_rom_spline(weight_sets, phase):
 
 # Test
 if __name__ == '__main__':
+    import matplotlib.pyplot as plt
+
     tf.enable_eager_execution()
 
     # densePF test:

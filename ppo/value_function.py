@@ -11,6 +11,7 @@ from sklearn.utils import shuffle
 
 class NNValueFunction(object):
     """ NN-based state-value function """
+
     def __init__(self, obs_dim, hid1_mult):
         """
         Args:
@@ -31,10 +32,12 @@ class NNValueFunction(object):
         """ Construct TensorFlow graph, including loss function, init op and train op """
         self.g = tf.Graph()
         with self.g.as_default():
-            self.obs_ph = tf.placeholder(tf.float32, (None, self.obs_dim), 'obs_valfunc')
+            self.obs_ph = tf.placeholder(
+                tf.float32, (None, self.obs_dim), 'obs_valfunc')
             self.val_ph = tf.placeholder(tf.float32, (None,), 'val_valfunc')
             # hid1 layer size is 10x obs_dim, hid3 size is 10, and hid2 is geometric mean
-            hid1_size = self.obs_dim * self.hid1_mult  # default multipler 10 chosen empirically on 'Hopper-v1'
+            # default multipler 10 chosen empirically on 'Hopper-v1'
+            hid1_size = self.obs_dim * self.hid1_mult
             hid3_size = 5  # 5 chosen empirically on 'Hopper-v1'
             hid2_size = int(np.sqrt(hid1_size * hid3_size))
             # heuristic to set learning rate based on NN size (tuned on 'Hopper-v1')
@@ -55,10 +58,15 @@ class NNValueFunction(object):
                                   kernel_initializer=tf.random_normal_initializer(
                                       stddev=np.sqrt(1 / hid3_size)), name='output')
             self.out = tf.squeeze(out)
-            self.loss = tf.reduce_mean(tf.square(self.out - self.val_ph))  # squared loss
+            self.loss = tf.reduce_mean(
+                tf.square(self.out - self.val_ph))  # squared loss
             optimizer = tf.train.AdamOptimizer(self.lr)
             self.train_op = optimizer.minimize(self.loss)
             self.init = tf.global_variables_initializer()
+
+            # Add ops to save and restore all the variables.
+            # This must live in this 'with' clause in order to be in the scope of the variables
+            self.saver = tf.train.Saver()
         self.sess = tf.Session(graph=self.g)
         self.sess.run(self.init)
 
@@ -88,10 +96,13 @@ class NNValueFunction(object):
                 end = (j + 1) * batch_size
                 feed_dict = {self.obs_ph: x_train[start:end, :],
                              self.val_ph: y_train[start:end]}
-                _, l = self.sess.run([self.train_op, self.loss], feed_dict=feed_dict)
+                _, l = self.sess.run(
+                    [self.train_op, self.loss], feed_dict=feed_dict)
         y_hat = self.predict(x)
-        loss = np.mean(np.square(y_hat - y))         # explained variance after update
-        exp_var = 1 - np.var(y - y_hat) / np.var(y)  # diagnose over-fitting of val func
+        # explained variance after update
+        loss = np.mean(np.square(y_hat - y))
+        # diagnose over-fitting of val func
+        exp_var = 1 - np.var(y - y_hat) / np.var(y)
 
         logger.log({'ValFuncLoss': loss,
                     'ExplainedVarNew': exp_var,
@@ -103,6 +114,10 @@ class NNValueFunction(object):
         y_hat = self.sess.run(self.out, feed_dict=feed_dict)
 
         return np.squeeze(y_hat)
+
+    def save(self, path):
+        save_path = self.saver.save(self.sess, path)
+        print('Saved value function model to %s' % save_path)
 
     def close_sess(self):
         """ Close TensorFlow session """

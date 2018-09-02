@@ -1,8 +1,5 @@
 from pymo.parsers import BVHParser
 from pymo.preprocessing import MocapParameterizer
-import pymo.viz_tools as vt
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 import pybullet as p
 import numpy as np
@@ -264,6 +261,10 @@ def get_and_save_mujoco_joint_id(joints, extremity_dict):
 
 
 def main():
+    # Import matplotlib only for this test. Need to import it globally for the alias 'plt' to be available in the draw functions
+    globals()['plt'] = __import__('matplotlib.pyplot').pyplot
+    from mpl_toolkits.mplot3d import Axes3D
+
     mujoco_body, mujoco_joints = load_mujoco_file()
 
     # To test, find the closest and furthest poses in the CMU recording to the mujoco defalut pose

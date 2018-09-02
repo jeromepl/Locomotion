@@ -45,6 +45,10 @@ class Policy(object):
             self._loss_train_op()
             self.init = tf.global_variables_initializer()
 
+            # Add ops to save and restore all the variables.
+            # This must live in this 'with' clause in order to be in the scope of the variables
+            self.saver = tf.train.Saver()
+
     def _placeholders(self):
         """ Input placeholders"""
         # observations, actions and advantages:
@@ -223,6 +227,10 @@ class Policy(object):
                     'KL': kl,
                     'Beta': self.beta,
                     '_lr_multiplier': self.lr_multiplier})
+
+    def save(self, path):
+        save_path = self.saver.save(self.sess, path)
+        print('Saved Policy model to %s' % save_path)
 
     def close_sess(self):
         """ Close TensorFlow session """

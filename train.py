@@ -44,6 +44,10 @@ import signal
 # TODO
 USE_PFNN = False
 
+# How frequently to save tensorflow models to log folder (in number of episodes)
+# NOTE This currently must be a multiple of the batch_size, otherwise no save will occur
+NET_SAVE_FREQ = 5000
+
 
 class GracefulKiller:
     """ Gracefully exit program on CTRL-C """
@@ -335,7 +339,7 @@ def log_batch_stats(observes, actions, advantages, disc_sum_rew, task_r, imitati
                 })
 
 
-def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, policy_logvar, task_reward_weight, imitation_reward_weight):
+def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, policy_logvar, task_reward_weight, imitation_reward_weight, logfolder):
     """ Main training loop
 
     Args:
@@ -356,7 +360,7 @@ def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, pol
         obs_dim += 1
 
     now = datetime.utcnow().strftime("%b-%d_%H-%M-%S")  # create unique directories
-    path = os.path.join('/ml-research-logs', env_name, now)
+    path = os.path.join(logfolder, env_name, now)
     logger = Logger(path)
     aigym_path = os.path.join(path, 'videos')
     env = wrappers.Monitor(env, aigym_path, force=True)
@@ -367,6 +371,9 @@ def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, pol
         policy = PFPolicy(obs_dim, act_dim, kl_targ, hid1_mult, policy_logvar)
     else:
         policy = Policy(obs_dim, act_dim, kl_targ, hid1_mult, policy_logvar)
+
+    # Save a reference to both models in the logger in order to save the models once trained
+    logger.add_tf_models({'policy': policy, 'value': val_func})
 
     # run a few episodes of untrained policy to initialize scaler:
     run_policy(env, policy, scaler, logger, 5,
@@ -394,7 +401,12 @@ def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, pol
             policy.update(observes, actions, advantages, logger)
 
         val_func.fit(observes, disc_sum_rew, logger)  # update value function
+
         logger.write(display=True)  # write logger results to file and stdout
+        if episode % NET_SAVE_FREQ == 0:
+            # Save the tensorflow models every once in a while
+            logger.save_models(episode)
+
         if killer.kill_now:
             if input('Terminate training (y/[n])? ') == 'y':
                 break
@@ -433,10 +445,12 @@ if __name__ == "__main__":
     parser.add_argument('-i', '--imitation_reward_weight', type=float,
                         help='Weight of the imitation reward',
                         default=0.3)
+    parser.add_argument('-L', '--logfolder', type=str,
+                        help='Path to the logs folder', default='D:\\ml-research-logs')
 
     parser.add_argument('-r', '--render', type=bool,
                         help='Show the humanoid training process in a new window',
-                        default=True)
+                        default=False)
 
     args = parser.parse_args()
 
