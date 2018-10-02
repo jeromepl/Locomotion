@@ -36,6 +36,7 @@ from ppo.value_function import NNValueFunction
 import scipy.signal
 from ppo.utils import Logger, Scaler
 from datetime import datetime
+import time
 import os
 import argparse
 import signal
@@ -339,7 +340,7 @@ def log_batch_stats(observes, actions, advantages, disc_sum_rew, task_r, imitati
                 })
 
 
-def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, policy_logvar, task_reward_weight, imitation_reward_weight, logfolder):
+def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, policy_logvar, task_reward_weight, imitation_reward_weight, logfolder, timemax):
     """ Main training loop
 
     Args:
@@ -360,6 +361,7 @@ def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, pol
         obs_dim += 1
 
     now = datetime.utcnow().strftime("%b-%d_%H-%M-%S")  # create unique directories
+    start_time = time.time() # In seconds
     path = os.path.join(logfolder, env_name, now)
     logger = Logger(path)
     aigym_path = os.path.join(path, 'videos')
@@ -407,10 +409,15 @@ def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, pol
             # Save the tensorflow models every once in a while
             logger.save_models(episode)
 
+        # Stop execution if user pressed Ctrl+C or if maximum time has elapsed
         if killer.kill_now:
             if input('Terminate training (y/[n])? ') == 'y':
                 break
             killer.kill_now = False
+        # Convert timemax from hours to seconds and give some room for error (30 min)
+        # just to be safe in the case this is running with a time limit on compute canada
+        if time.time() - start_time > max(timemax - 0.5, 1) * 3600:
+            break
     logger.close()
     policy.close_sess()
     val_func.close_sess()
@@ -434,7 +441,7 @@ if __name__ == "__main__":
                         default=20)
     parser.add_argument('-m', '--hid1_mult', type=int,
                         help='Size of first hidden layer for value and policy NNs'
-                             '(integer multiplier of observation dimension)',
+                             ' (integer multiplier of observation dimension)',
                         default=10)
     parser.add_argument('-v', '--policy_logvar', type=float,
                         help='Initial policy log-variance (natural log of variance)',
@@ -447,10 +454,15 @@ if __name__ == "__main__":
                         default=0.3)
     parser.add_argument('-L', '--logfolder', type=str,
                         help='Path to the logs folder', default='D:\\ml-research-logs')
+    parser.add_argument('-T', '--timemax', type=int,
+                        help='Maximum time (in hours) allowed for this to run, after which'
+                             ' program execution stops and data is saved. Note that'
+                             ' execution will stop within 30 min of the allowed time in order'
+                             ' to make sure that the last epoch fully runs', default=168) # 7 days default
 
-    parser.add_argument('-r', '--render', type=bool,
+    parser.add_argument('-r', '--render', type=bool, nargs='?',
                         help='Show the humanoid training process in a new window',
-                        default=False)
+                        const=True, default=False)
 
     args = parser.parse_args()
 
