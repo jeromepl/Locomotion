@@ -120,7 +120,6 @@ class DeepMimicBaseBulletEnv(MJCFBaseBulletEnv):
             electricity_cost,
             joints_at_limit_cost,
             feet_collision_cost,
-            # self.robot.get_imitation_reward() * 10e16
         ]
 
         if (debugmode):

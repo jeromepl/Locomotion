@@ -131,17 +131,18 @@ def run_episode(env, policy, scaler, task_reward_weight, imitation_reward_weight
             action = policy.sample(obs).reshape((1, -1)).astype(np.float32)
 
         actions.append(action)
+        # obs, reward, done, _ = env.step(np.squeeze(np.zeros(action.shape))) # Use this to test initialization
         obs, reward, done, _ = env.step(np.squeeze(action, axis=0))
 
         # Scale the task reward
-        reward *= task_reward_weight
+        # reward = reward**task_reward_weight # TODO: Not safe to do on negative numbers (could get imaginary numbers)
         task_rs.append(reward)
 
         # Add the imitation reward to the standard env reward
         imitation_r, phase = env.env.env.robot.get_imitation_reward_and_phase(
             step)  # phase is [0, 1)
-        reward += imitation_r[0] * imitation_reward_weight
-        imitation_rs.append(imitation_r[0] * imitation_reward_weight)
+        reward /= (-imitation_r[0])**imitation_reward_weight
+        imitation_rs.append(-(-imitation_r[0])**imitation_reward_weight)
 
         position_cost.append(imitation_r[1][0])
         velocity_cost.append(imitation_r[1][1])
@@ -452,10 +453,10 @@ if __name__ == "__main__":
                         default=-1.0)
     parser.add_argument('-t', '--task_reward_weight', type=float,
                         help='Weight of the task reward',
-                        default=0.7)
+                        default=1.0)
     parser.add_argument('-i', '--imitation_reward_weight', type=float,
                         help='Weight of the imitation reward',
-                        default=0.3)
+                        default=1.0)
     parser.add_argument('-L', '--logfolder', type=str,
                         help='Path to the logs folder', default='D:\\ml-research-logs')
     parser.add_argument('-T', '--timemax', type=int,
