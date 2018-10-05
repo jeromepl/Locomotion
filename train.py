@@ -340,7 +340,7 @@ def log_batch_stats(observes, actions, advantages, disc_sum_rew, task_r, imitati
                 })
 
 
-def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, policy_logvar, task_reward_weight, imitation_reward_weight, logfolder, timemax):
+def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, policy_logvar, task_reward_weight, imitation_reward_weight, logfolder, timemax, jobid):
     """ Main training loop
 
     Args:
@@ -356,13 +356,17 @@ def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, pol
     killer = GracefulKiller()
     env, obs_dim, act_dim = init_gym(env_name)
 
+    start_time = time.time() # In seconds
+
     if not USE_PFNN:
         # add 1 to obs dimension for time step feature (see run_episode())
         obs_dim += 1
 
-    now = datetime.utcnow().strftime("%b-%d_%H-%M-%S")  # create unique directories
-    start_time = time.time() # In seconds
-    path = os.path.join(logfolder, env_name, now)
+    if jobid is not None:
+        path = os.path.join(logfolder, jobid)
+    else:
+        now = datetime.utcnow().strftime("%b-%d_%H-%M-%S")  # create unique directories
+        path = os.path.join(logfolder, now)
     logger = Logger(path)
     aigym_path = os.path.join(path, 'videos')
     env = wrappers.Monitor(env, aigym_path, force=True)
@@ -459,6 +463,8 @@ if __name__ == "__main__":
                              ' program execution stops and data is saved. Note that'
                              ' execution will stop within 30 min of the allowed time in order'
                              ' to make sure that the last epoch fully runs', default=168) # 7 days default
+    parser.add_argument('-j', '--jobid', type=str, default=None,
+                        help='Slurm job ID to use as the name of the log folder')
 
     parser.add_argument('-r', '--render', type=bool, nargs='?',
                         help='Show the humanoid training process in a new window',
