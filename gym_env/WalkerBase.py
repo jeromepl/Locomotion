@@ -19,9 +19,22 @@ class WalkerBase(MJCFBasedRobot):
     def robot_specific_reset(self, bullet_client):
         self._p = bullet_client
         for j in self.ordered_joints:
-            j.reset_current_position(0, 0)
             # j.reset_current_position(
-            #     self.np_random.uniform(low=-0.1, high=0.1), 0)
+            #         self.np_random.uniform(low=-0.1, high=0.1), 0)
+            j.reset_current_position(0, 0)
+
+            # Give the robot a leg stance similar to the start of the reference motion
+            if j.joint_name == 'left_hip_y':
+                j.reset_current_position(0.3, 0)
+            elif j.joint_name == 'right_hip_y':
+                j.reset_current_position(-0.3, 0)
+
+        # Also apply an initial force to the robot to give it some initial momentum forward
+        # This should help the agent learn since the reference motion does not start from
+        # a human at rest, but rather starts in the middle of a walking sequence
+        self._p.applyExternalForce(self.robot_body.bodies[self.robot_body.bodyIndex], -1, [1900, 0, 50], [0, 0, -0.25], self._p.LINK_FRAME)
+        # Also add a small force higher on the body to make it tilt **slightly** forward
+        self._p.applyExternalForce(self.robot_body.bodies[self.robot_body.bodyIndex], -1, [350, 0, 0], [0, 0, 0.25], self._p.LINK_FRAME)
 
         self.feet = [self.parts[f] for f in self.foot_list]
         self.feet_contact = np.array(
