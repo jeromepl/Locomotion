@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 
 
 # Dense Phase-Functionned layer
@@ -17,7 +18,7 @@ def densePF(
 
     weight_sets = []
     for _ in range(NB_WEIGHT_SETS):
-        weight_sets.append(tf.random_normal([shape[-1], units]))
+        weight_sets.append(tf.random_normal([shape[-1], units], stddev=np.sqrt(1 / shape[-1])))
 
     kernel = cubic_catmull_rom_spline(weight_sets, phase)
 

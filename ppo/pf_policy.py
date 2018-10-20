@@ -50,9 +50,8 @@ class PFPolicy(Policy):
                       hid1_size, activation=tf.tanh)
         out = densePF(out, self.phase_ph, hid2_size, activation=tf.tanh)
         out = densePF(out, self.phase_ph, hid3_size, activation=tf.tanh)
-        self.means = tf.layers.dense(out, self.act_dim,
-                                     kernel_initializer=tf.random_normal_initializer(
-                                         stddev=np.sqrt(1 / hid3_size)), name="means")
+        self.means = densePF(out, self.phase_ph, self.act_dim)
+
         # logvar_speed is used to 'fool' gradient descent into making faster updates
         # to log-variances. heuristic sets logvar_speed based on network size.
         logvar_speed = (10 * hid3_size) // 48

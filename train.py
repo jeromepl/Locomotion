@@ -43,7 +43,7 @@ import signal
 
 
 # TODO
-USE_PFNN = False
+USE_PFNN = True
 
 # How frequently to save tensorflow models to log folder (in number of episodes)
 # NOTE This currently must be a multiple of the batch_size, otherwise no save will occur
@@ -115,9 +115,8 @@ def run_episode(env, policy, scaler, task_reward_weight, imitation_reward_weight
         # HIGHLIGHT
         obs = obs.astype(np.float32).reshape((1, -1))
 
-        if not USE_PFNN:
-            # add phase feature to observation
-            obs = np.append(obs, [[phase]], axis=1)
+        # add phase feature to observation
+        obs = np.append(obs, [[phase]], axis=1)
 
         phases.append([[phase]])
         unscaled_obs.append(obs)
@@ -358,9 +357,8 @@ def main(env_name, num_episodes, gamma, lam, kl_targ, batch_size, hid1_mult, pol
 
     start_time = time.time() # In seconds
 
-    if not USE_PFNN:
-        # add 1 to obs dimension for time step feature (see run_episode())
-        obs_dim += 1
+    # add 1 to obs dimension for time step feature (see run_episode())
+    obs_dim += 1
 
     if jobid is not None:
         path = os.path.join(logfolder, jobid)
