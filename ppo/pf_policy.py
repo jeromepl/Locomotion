@@ -45,12 +45,19 @@ class PFPolicy(Policy):
         # heuristic to set learning rate based on NN size (tuned on 'Hopper-v1')
         self.lr = 9e-4 / np.sqrt(hid2_size)  # 9e-4 empirically determined
         # 3 hidden layers with tanh activations
-        # TODO add kernel initializer and name for each layer
-        out = densePF(self.obs_ph, self.phase_ph,
-                      hid1_size, activation=tf.tanh)
-        out = densePF(out, self.phase_ph, hid2_size, activation=tf.tanh)
-        out = densePF(out, self.phase_ph, hid3_size, activation=tf.tanh)
-        self.means = densePF(out, self.phase_ph, self.act_dim)
+        out = densePF(self.obs_ph, self.phase_ph, hid1_size, tf.tanh,
+                            kernel_initializer=tf.random_normal_initializer(
+                                stddev=np.sqrt(1 / self.obs_dim)), name="h1")
+        out = densePF(out, self.phase_ph, hid2_size, tf.tanh,
+                            kernel_initializer=tf.random_normal_initializer(
+                                stddev=np.sqrt(1 / hid1_size)), name="h2")
+        out = densePF(out, self.phase_ph, hid3_size, tf.tanh,
+                            kernel_initializer=tf.random_normal_initializer(
+                                stddev=np.sqrt(1 / hid2_size)), name="h3")
+        # TODO consider using densePF in the output layer too
+        self.means = tf.layers.dense(out, self.act_dim,
+                            kernel_initializer=tf.random_normal_initializer(
+                                stddev=np.sqrt(1 / hid3_size)), name="means")
 
         # logvar_speed is used to 'fool' gradient descent into making faster updates
         # to log-variances. heuristic sets logvar_speed based on network size.
@@ -94,7 +101,6 @@ class PFPolicy(Policy):
             self.sess.run(self.train_op, feed_dict)
             loss, kl, entropy = self.sess.run(
                 [self.loss, self.kl, self.entropy], feed_dict)
-            print(f'sess run results: {loss}, {kl}, {entropy}')
             if kl > self.kl_targ * 4:  # early stopping if D_KL diverges badly
                 break
         # TODO: too many "magic numbers" in next 8 lines of code, need to clean up

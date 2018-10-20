@@ -9,41 +9,20 @@ def densePF(
         phase,
         units,
         activation=None,
-        use_bias=True):
+        kernel_initializer=None,
+        name='pfnn'):
 
     # TODO allow changing this (need to use different interpolation function)
     NB_WEIGHT_SETS = 4
     inputs = tf.convert_to_tensor(inputs)
     shape = inputs.get_shape().as_list()
 
-    weight_sets = []
-    for _ in range(NB_WEIGHT_SETS):
-        weight_sets.append(tf.random_normal([shape[-1], units], stddev=np.sqrt(1 / shape[-1])))
+    # Create 4 tf dense layers and then interpolate them using the cubic catmull rom spline function
+    layers = []
+    for i in range(NB_WEIGHT_SETS):
+        layers.append(tf.layers.dense(inputs, units, activation, kernel_initializer=kernel_initializer, name=name + '_' + str(i)))
 
-    kernel = cubic_catmull_rom_spline(weight_sets, phase)
-
-    if use_bias:
-        bias_sets = []
-        for _ in range(NB_WEIGHT_SETS):
-            bias_sets.append(tf.random_normal([units, ]))
-
-        bias = cubic_catmull_rom_spline(bias_sets, phase)
-
-    # The following was taken and adapted from https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/keras/_impl/keras/layers/core.py#L879
-    if len(shape) > 2:
-        # Broadcasting is required for the inputs.
-        outputs = tf.tensordot(inputs, kernel, [[len(shape) - 1], [0]])
-        # Reshape the output back to the original ndim of the input.
-        if not tf.executing_eagerly():
-            output_shape = shape[:-1] + [units]
-            outputs.set_shape(output_shape)
-    else:
-        outputs = tf.matmul(inputs, kernel)
-    if use_bias:
-        outputs = tf.nn.bias_add(outputs, bias)
-    if activation is not None:
-        return activation(outputs)
-    return outputs
+    return cubic_catmull_rom_spline(layers, phase)
 
 
 def cubic_catmull_rom_spline(weight_sets, phase):
